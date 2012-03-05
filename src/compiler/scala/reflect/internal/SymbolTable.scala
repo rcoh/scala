@@ -8,6 +8,7 @@ package internal
 
 import scala.collection.{ mutable, immutable }
 import util._
+import scala.tools.nsc.util.WeakHashSet
 
 abstract class SymbolTable extends api.Universe
                               with Collections
@@ -42,7 +43,7 @@ abstract class SymbolTable extends api.Universe
   /** Override with final implementation for inlining. */
   def debuglog(msg:  => String): Unit = if (settings.debug.value) log(msg)
   def debugwarn(msg: => String): Unit = if (settings.debug.value) Console.err.println(msg)
-  
+
   /** Overridden when we know more about what was happening during a failure. */
   def supplementErrorMessage(msg: String): String = msg
 
@@ -78,7 +79,8 @@ abstract class SymbolTable extends api.Universe
   type RunId = Int
   final val NoRunId = 0
 
-  private var phStack: List[Phase] = Nil
+  // sigh, this has to be public or atPhase doesn't inline.
+  var phStack: List[Phase] = Nil
   private var ph: Phase = NoPhase
   private var per = NoPeriod
 
@@ -90,6 +92,16 @@ abstract class SymbolTable extends api.Universe
     assert((p ne null) && p != NoPhase, p)
     ph = p
     per = period(currentRunId, p.id)
+  }
+  final def pushPhase(ph: Phase): Phase = {
+    val current = phase
+    phase = ph
+    phStack ::= ph
+    current
+  }
+  final def popPhase(ph: Phase) {
+    phStack = phStack.tail
+    phase = ph
   }
 
   /** The current compiler run identifier. */
@@ -118,20 +130,19 @@ abstract class SymbolTable extends api.Universe
 
   /** Perform given operation at given phase. */
   @inline final def atPhase[T](ph: Phase)(op: => T): T = {
-    val current = phase
-    phase = ph
-    phStack ::= ph
+    val saved = pushPhase(ph)
     try op
-    finally {
-      phase = current
-      phStack = phStack.tail
-    }
+    finally popPhase(saved)
   }
+  
+
   /** Since when it is to be "at" a phase is inherently ambiguous,
    *  a couple unambiguously named methods.
    */
   @inline final def beforePhase[T](ph: Phase)(op: => T): T = atPhase(ph)(op)
   @inline final def afterPhase[T](ph: Phase)(op: => T): T  = atPhase(ph.next)(op)
+  @inline final def afterCurrentPhase[T](op: => T): T      = atPhase(phase.next)(op)
+  @inline final def beforePrevPhase[T](op: => T): T        = atPhase(phase.prev)(op)
 
   @inline final def atPhaseNotLaterThan[T](target: Phase)(op: => T): T =
     if (target != NoPhase && phase.id > target.id) atPhase(target)(op) else op
@@ -266,9 +277,10 @@ abstract class SymbolTable extends api.Universe
       }
     }
 
-    def newWeakMap[K, V]() = recordCache(mutable.WeakHashMap[K, V]())
-    def newMap[K, V]()     = recordCache(mutable.HashMap[K, V]())
-    def newSet[K]()        = recordCache(mutable.HashSet[K]())
+    def newWeakMap[K, V]()        = recordCache(mutable.WeakHashMap[K, V]())
+    def newMap[K, V]()            = recordCache(mutable.HashMap[K, V]())
+    def newSet[K]()               = recordCache(mutable.HashSet[K]())
+    def newWeakSet[K <: AnyRef]() = recordCache(new WeakHashSet[K]())
   }
 
   /** Break into repl debugger if assertion is true. */
@@ -285,7 +297,7 @@ abstract class SymbolTable extends api.Universe
 
   /** The phase which has given index as identifier. */
   val phaseWithId: Array[Phase]
-  
+
   /** Is this symbol table part of reflexive mirror? In this case
    *  operations need to be made thread safe.
    */
