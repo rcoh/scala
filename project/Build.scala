@@ -180,7 +180,7 @@ object ScalaBuild extends Build with Layers {
   // --------------------------------------------------------------
 
   // Jline nested project.   Compile this sucker once and be done.
-  lazy val jline = Project("jline", file("src/jline"))
+  lazy val jline = Project("jline", file("."))
   // Fast Java Bytecode Generator (nested in every scala-compiler.jar)
   lazy val fjbg = Project("fjbg", file(".")) settings(settingOverrides : _*)
   // Forkjoin backport
@@ -492,8 +492,8 @@ object ScalaBuild extends Build with Layers {
     genBin <<= genBinTask(genBinRunner, binDir, fullClasspath in Runtime, false),
     binDir in genBinQuick <<= baseDirectory apply (_ / "target" / "bin"),
     // Configure the classpath this way to avoid having .jar files and previous layers on the classpath.
-    fullClasspath in Runtime in genBinQuick <<= Seq(quickComp,quickLib,scalap,actors,swing,dbc,fjbg,jline,forkjoin).map(classDirectory in Compile in _).join.map(Attributed.blankSeq),
-    fullClasspath in Runtime in genBinQuick <++= (fullClasspath in Compile in jline),
+    fullClasspath in Runtime in genBinQuick <<= Seq(quickComp,quickLib,scalap,actors,swing,dbc,fjbg,forkjoin).map(classDirectory in Compile in _).join.map(Attributed.blankSeq),
+    // fullClasspath in Runtime in genBinQuick <++= (fullClasspath in Compile in jline),
     genBinQuick <<= genBinTask(genBinRunner, binDir in genBinQuick, fullClasspath in Runtime in genBinQuick, true),
     runManmakerMan <<= runManmakerTask(fullClasspath in Runtime in manmaker, runner in manmaker, "scala.tools.docutil.EmitManPage", "man1", ".1"),
     runManmakerHtml <<= runManmakerTask(fullClasspath in Runtime in manmaker, runner in manmaker, "scala.tools.docutil.EmitHtml", "doc", ".html"),
