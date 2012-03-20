@@ -1,9 +1,7 @@
 import sbt._
 import Keys._
-import _root_.com.jsuereth.git.GitRunner
 
 object Release {
-
   // TODO - move more of the dist project over here...
 
 
@@ -66,11 +64,11 @@ object Release {
 
   /** This generates a  properties file, if it does not already exist, with the maximum lastmodified timestamp
     * of any source file. */
-  def generatePropertiesFile(name: String)(baseDirectory: File, version: String, dir: File, git: GitRunner, s: TaskStreams): Seq[File] = {
+  def generatePropertiesFile(name: String)(baseDirectory: File, version: String, dir: File, s: TaskStreams): Seq[File] = {
     // TODO - We can probably clean this up by moving caching bits elsewhere perhaps....
     val target = dir / name        
     // TODO - Regenerate on triggers, like recompilation or something...
-    val fullVersion = makeFullVersionString(baseDirectory, version, git, s)
+    val fullVersion = makeFullVersionString(baseDirectory, version, s)
     def hasSameVersion: Boolean = {
       val props = new java.util.Properties
       val in = new java.io.FileInputStream(target)
@@ -88,14 +86,16 @@ object Release {
   def makePropertiesFile(f: File, version: String): Unit =
     IO.write(f, "version.number = "+version+"\ncopyright.string = Copyright 2002-2011, LAMP/EPFL")
 
-  def makeFullVersionString(baseDirectory: File, baseVersion: String, git: GitRunner, s: TaskStreams) = baseVersion+"."+getGitRevision(baseDirectory, git, currentDay, s)
+  def makeFullVersionString(baseDirectory: File, baseVersion: String, s: TaskStreams) = 
+    baseVersion + ".BIPPY"
+    // baseVersion+"."+getGitRevision(baseDirectory, currentDay, s)
 
   // TODO - do we want this in the build number?
   def currentDay = (new java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss")) format (new java.util.Date)
 
 
 
-  def getGitRevision(baseDirectory: File, git: GitRunner, date: String, s: TaskStreams) = {
+  def getGitRevision(baseDirectory: File, date: String, s: TaskStreams) = {
 
     val mergeBase = {
       // TODO - Cache this value.
@@ -103,13 +103,14 @@ object Release {
       "df13e31bbb"
     }
     // current commit sha
-    val sha =
-     git("rev-list", "-n", "1", "HEAD")(baseDirectory, s.log)
+    val sha = "16def6425a"
+     // git("rev-list", "-n", "1", "HEAD")(baseDirectory, s.log)
     
-    val commits =
-     git("--no-pager", "log", "--pretty=oneline", mergeBase +"..HEAD")(baseDirectory, s.log) split "[\r\n]+" size
+    val commits = "123"
+     // git("--no-pager", "log", "--pretty=oneline", mergeBase +"..HEAD")(baseDirectory, s.log) split "[\r\n]+" size
     
-    "rdev-%d-%s-g%s" format (commits, date, sha.substring(0,7))
+    "123-16def6425a"
+    // "%d-%s-g%s" format (commits, date, sha.take(10))
   }
   
 }

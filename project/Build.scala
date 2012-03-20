@@ -149,7 +149,7 @@ object ScalaBuild extends Build with Layers {
   lazy val externalDeps: Setting[_] = libraryDependencies <<= (sbtVersion)(v => 
     Seq(
       "org.apache.ant" % "ant" % "1.8.2",
-      "org.scala-tools.sbt" % "compiler-interface" % v % "provided"
+      "org.scala-sbt" % "compiler-interface" % v % "provided"
     )
   )
 
