@@ -274,6 +274,12 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       skolem setInfo (basis.info cloneInfo skolem)
     }
 
+    // flags set up to maintain TypeSkolem's invariant: origin.isInstanceOf[Symbol] == !hasFlag(EXISTENTIAL)
+    // CASEACCESSOR | SYNTHETIC used to single this symbol out in deskolemizeGADT
+    def newGADTSkolem(name: TypeName, origin: Symbol, info: Type): TypeSkolem =
+      newTypeSkolemSymbol(name, origin, origin.pos, origin.flags & ~(EXISTENTIAL | PARAM) | CASEACCESSOR | SYNTHETIC) setInfo info
+
+
     final def newExistential(name: TypeName, pos: Position = NoPosition, newFlags: Long = 0L): Symbol =
       newAbstractType(name, pos, EXISTENTIAL | newFlags)
 
@@ -441,7 +447,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     final def isRefinementClass    = isClass && name == tpnme.REFINE_CLASS_NAME
     final def isSourceMethod       = isMethod && !hasFlag(STABLE) // exclude all accessors!!!
     final def isTypeParameter      = isType && isParameter && !isSkolem
-    final def isValueClass         = definitions.isValueClass(this)
+    final def isPrimitiveValueClass = definitions.isPrimitiveValueClass(this)
     final def isVarargsMethod      = isMethod && hasFlag(VARARGS)
 
     /** Package tests */
@@ -495,9 +501,16 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     // List[T] forSome { type T }
     final def isExistentialSkolem     = isExistentiallyBound && isSkolem
     final def isExistentialQuantified = isExistentiallyBound && !isSkolem
+    final def isGADTSkolem            = isSkolem && hasFlag(CASEACCESSOR | SYNTHETIC)
 
     // class C extends D( { class E { ... } ... } ). Here, E is a class local to a constructor
     final def isClassLocalToConstructor = isClass && hasFlag(INCONSTRUCTOR)
+
+    final def isDerivedValueClass =
+      isClass && info.firstParent.typeSymbol == AnyValClass && !isPrimitiveValueClass
+
+    final def isMethodWithExtension =
+      isMethod && owner.isDerivedValueClass && !isParamAccessor && !isConstructor && !hasFlag(SUPERACCESSOR)
 
     final def isAnonymousClass             = isClass && (name containsName tpnme.ANON_CLASS_NAME)
     final def isAnonymousFunction          = isSynthetic && (name containsName tpnme.ANON_FUN_NAME)
@@ -853,8 +866,8 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     )
     /** These should be moved somewhere like JavaPlatform.
      */
-    def javaSimpleName: String = addModuleSuffix(nme.dropLocalSuffix(simpleName)).toString
-    def javaBinaryName: String = addModuleSuffix(fullNameInternal('/')).toString
+    def javaSimpleName: Name = addModuleSuffix(nme.dropLocalSuffix(simpleName))
+    def javaBinaryName: Name = addModuleSuffix(fullNameInternal('/'))
     def javaClassName: String  = addModuleSuffix(fullNameInternal('.')).toString
 
     /** The encoded full path name of this symbol, where outer names and inner names
@@ -1598,7 +1611,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       else owner.logicallyEnclosingMember
 
     /** Kept for source compatibility with 2.9. Scala IDE for Eclipse relies on this. */
-    @deprecated("Use enclosingTopLevelClass")
+    @deprecated("Use enclosingTopLevelClass", "2.10.0")
     def toplevelClass: Symbol = enclosingTopLevelClass
 
     /** The top-level class containing this symbol. */
@@ -1835,7 +1848,12 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       base.info.decl(sname) filter (_.hasAccessorFlag)
     }
 
-    /** The case module corresponding to this case class
+    /** Return the accessor method of the first parameter of this class.
+     *  or NoSymbol if it does not exist.
+     */
+    def firstParamAccessor: Symbol = NoSymbol
+
+     /** The case module corresponding to this case class
      *  @pre case class is a member of some other class or package
      */
     final def caseModule: Symbol = {
@@ -1974,6 +1992,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
         else if (isTrait) ("trait", "trait", "TRT")
         else if (isClass) ("class", "class", "CLS")
         else if (isType) ("type", "type", "TPE")
+        else if (isClassConstructor && isPrimaryConstructor) ("primary constructor", "constructor", "PCTOR")
         else if (isClassConstructor) ("constructor", "constructor", "CTOR")
         else if (isSourceMethod) ("method", "method", "METH")
         else if (isTerm) ("value", "value", "VAL")
@@ -2118,12 +2137,17 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
       else if (owner.isRefinementClass) ExplicitFlags & ~OVERRIDE
       else ExplicitFlags
 
+    // make the error message more googlable
+    def flagsExplanationString =
+      if (isGADTSkolem) " (this is a GADT skolem)"
+      else ""
+
     def accessString = hasFlagsToString(PRIVATE | PROTECTED | LOCAL)
     def defaultFlagString = hasFlagsToString(defaultFlagMask)
     private def defStringCompose(infoString: String) = compose(
       defaultFlagString,
       keyString,
-      varianceString + nameString + infoString
+      varianceString + nameString + infoString + flagsExplanationString
     )
     /** String representation of symbol's definition.  It uses the
      *  symbol's raw info to avoid forcing types.
@@ -2466,7 +2490,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
    *  where the skolem was introduced (this is important for knowing when to pack it
    *  again into ab Existential). origin is `null` only in skolemizeExistentials called
    *  from <:< or isAsSpecific, because here its value does not matter.
-   *  I elieve the following invariant holds:
+   *  I believe the following invariant holds:
    *
    *     origin.isInstanceOf[Symbol] == !hasFlag(EXISTENTIAL)
    */
@@ -2510,7 +2534,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     final override def isAbstractType = false
     final override def isAliasType = false
 
-    override def existentialBound = polyType(this.typeParams, TypeBounds.upper(this.classBound))
+    override def existentialBound = GenPolyType(this.typeParams, TypeBounds.upper(this.classBound))
 
     override def sourceFile =
       if (owner.isPackageClass) source
@@ -2584,6 +2608,10 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
 
     override def sourceModule =
       if (isModuleClass) companionModule else NoSymbol
+
+    override def firstParamAccessor =
+      info.decls.find(m => (m hasFlag PARAMACCESSOR) && m.isMethod) getOrElse NoSymbol
+
 
     private[this] var childSet: Set[Symbol] = Set()
     override def children = childSet
@@ -2742,7 +2770,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
   /** An exception for cyclic references of symbol definitions */
   case class CyclicReference(sym: Symbol, info: Type)
   extends TypeError("illegal cyclic reference involving " + sym) {
-    // printStackTrace() // debug
+    if (settings.debug.value) printStackTrace()
   }
 
   case class InvalidCompanions(sym1: Symbol, sym2: Symbol) extends Throwable(
