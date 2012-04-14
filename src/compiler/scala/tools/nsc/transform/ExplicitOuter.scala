@@ -68,7 +68,7 @@ abstract class ExplicitOuter extends InfoTransform
 
     result
   }
-  
+
   private val innerClassConstructorParamName: TermName = newTermName("arg" + nme.OUTER)
 
   class RemoveBindingsTransformer(toRemove: Set[Symbol]) extends Transformer {
@@ -89,13 +89,13 @@ abstract class ExplicitOuter extends InfoTransform
   def outerAccessor(clazz: Symbol): Symbol = {
     val firstTry = clazz.info.decl(nme.expandedName(nme.OUTER, clazz))
     if (firstTry != NoSymbol && firstTry.outerSource == clazz) firstTry
-    else clazz.info.decls find (_.outerSource == clazz) getOrElse NoSymbol
-   }
+    else findOrElse(clazz.info.decls)(_.outerSource == clazz)(NoSymbol)
+  }
   def newOuterAccessor(clazz: Symbol) = {
     val accFlags = SYNTHETIC | METHOD | STABLE | ( if (clazz.isTrait) DEFERRED else 0 )
-    val sym      = clazz.newMethodSymbol(nme.OUTER, clazz.pos, accFlags)
+    val sym      = clazz.newMethod(nme.OUTER, clazz.pos, accFlags)
     val restpe   = if (clazz.isTrait) clazz.outerClass.tpe else clazz.outerClass.thisType
-    
+
     sym expandName clazz
     sym.referenced = clazz
     sym setInfo MethodType(Nil, restpe)
@@ -163,7 +163,7 @@ abstract class ExplicitOuter extends InfoTransform
         decls1 = decls.cloneScope
         val outerAcc = clazz.newMethod(nme.OUTER, clazz.pos) // 3
         outerAcc expandName clazz
-        
+
         decls1 enter newOuterAccessor(clazz)
         if (hasOuterField(clazz)) //2
           decls1 enter newOuterField(clazz)
@@ -357,7 +357,7 @@ abstract class ExplicitOuter extends InfoTransform
      */
     def mixinOuterAccessorDef(mixinClass: Symbol): Tree = {
       val outerAcc    = outerAccessor(mixinClass) overridingSymbol currentClass
-      def mixinPrefix = currentClass.thisType baseType mixinClass prefix;
+      def mixinPrefix = (currentClass.thisType baseType mixinClass).prefix
       assert(outerAcc != NoSymbol, "No outer accessor for inner mixin " + mixinClass + " in " + currentClass)
       // I added the mixinPrefix.typeArgs.nonEmpty condition to address the
       // crash in SI-4970.  I feel quite sure this can be improved.
@@ -468,7 +468,7 @@ abstract class ExplicitOuter extends InfoTransform
             }
           }
           super.transform(
-            deriveTemplate(tree)(decls => 
+            deriveTemplate(tree)(decls =>
               if (newDefs.isEmpty) decls
               else decls ::: newDefs.toList
             )

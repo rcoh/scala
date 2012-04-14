@@ -18,19 +18,6 @@ abstract class LambdaLift extends InfoTransform {
 
   /** the following two members override abstract members in Transform */
   val phaseName: String = "lambdalift"
-    
-  /** Converts types of captured variables to *Ref types.
-   */
-  def boxIfCaptured(sym: Symbol, tpe: Type, erasedTypes: Boolean) =
-    if (sym.isCapturedVariable) {
-      val symClass = tpe.typeSymbol
-      def refType(valueRef: Map[Symbol, Symbol], objectRefClass: Symbol) =
-        if (isValueClass(symClass) && symClass != UnitClass) valueRef(symClass).tpe
-        else if (erasedTypes) objectRefClass.tpe
-        else appliedType(objectRefClass.typeConstructor, List(tpe))
-      if (sym.hasAnnotation(VolatileAttr)) refType(volatileRefClass, VolatileObjectRefClass)
-      else refType(refClass, ObjectRefClass)
-    } else tpe
 
   private val lifted = new TypeMap {
     def apply(tp: Type): Type = tp match {
@@ -46,7 +33,8 @@ abstract class LambdaLift extends InfoTransform {
   }
 
   def transformInfo(sym: Symbol, tp: Type): Type =
-    boxIfCaptured(sym, lifted(tp), erasedTypes = true)
+    if (sym.isCapturedVariable) capturedVariableType(sym, tpe = lifted(tp), erasedTypes = true)
+    else lifted(tp)
 
   protected def newTransformer(unit: CompilationUnit): Transformer =
     new LambdaLifter(unit)
@@ -75,10 +63,10 @@ abstract class LambdaLift extends InfoTransform {
 
     /** Buffers for lifted out classes and methods */
     private val liftedDefs = new LinkedHashMap[Symbol, List[Tree]]
-    
+
     /** True if we are transforming under a ReferenceToBoxed node */
     private var isBoxedRef = false
-    
+
     private type SymSet = TreeSet[Symbol]
 
     private def newSymSet = new TreeSet[Symbol](_ isLess _)
@@ -221,7 +209,7 @@ abstract class LambdaLift extends InfoTransform {
         for (caller <- called.keys ; callee <- called(caller) ; fvs <- free get callee ; fv <- fvs)
           markFree(fv, caller)
       } while (changedFreeVars)
-      
+
       def renameSym(sym: Symbol) {
         val originalName = sym.name
         val base = sym.name + nme.NAME_JOIN_STRING + (
@@ -229,10 +217,10 @@ abstract class LambdaLift extends InfoTransform {
             sym.owner.name + nme.NAME_JOIN_STRING
           else ""
         )
-        sym.name =
+        sym setName (
           if (sym.name.isTypeName) unit.freshTypeName(base)
           else unit.freshTermName(base)
-
+        )
         debuglog("renaming in %s: %s => %s".format(sym.owner.fullLocationString, originalName, sym.name))
       }
 
@@ -241,11 +229,11 @@ abstract class LambdaLift extends InfoTransform {
       def renameTrait(traitSym: Symbol, implSym: Symbol) {
         val originalImplName = implSym.name
         renameSym(traitSym)
-        implSym.name = nme.implClassName(traitSym.name)
+        implSym setName nme.implClassName(traitSym.name)
 
         debuglog("renaming impl class in step with %s: %s => %s".format(traitSym, originalImplName, implSym.name))
       }
-      
+
       for (sym <- renamable) {
         // If we renamed a trait from Foo to Foo$1, we must rename the implementation
         // class from Foo$class to Foo$1$class.  (Without special consideration it would
@@ -324,7 +312,7 @@ abstract class LambdaLift extends InfoTransform {
             val addParams = cloneSymbols(ps).map(_.setFlag(PARAM))
             sym.updateInfo(
               lifted(MethodType(sym.info.params ::: addParams, sym.info.resultType)))
-            
+
             copyDefDef(tree)(vparamss = List(vparams ++ freeParams))
           case ClassDef(_, _, _, _) =>
             // Disabled attempt to to add getters to freeParams
@@ -419,10 +407,10 @@ abstract class LambdaLift extends InfoTransform {
             def refConstr(expr: Tree): Tree = expr match {
               case Try(block, catches, finalizer) =>
                 Try(refConstr(block), catches map refConstrCase, finalizer)
-              case _ => 
+              case _ =>
                 New(sym.tpe, expr)
             }
-            def refConstrCase(cdef: CaseDef): CaseDef = 
+            def refConstrCase(cdef: CaseDef): CaseDef =
               CaseDef(cdef.pat, cdef.guard, refConstr(cdef.body))
             treeCopy.ValDef(tree, mods, name, tpt1, typer.typedPos(rhs.pos) {
               refConstr(constructorArg)
@@ -467,16 +455,18 @@ abstract class LambdaLift extends InfoTransform {
           tree
       }
     }
-    
+
     private def preTransform(tree: Tree) = super.transform(tree) setType lifted(tree.tpe)
 
     override def transform(tree: Tree): Tree = tree match {
+      case Select(ReferenceToBoxed(idt), elem) if elem == nme.elem =>
+        postTransform(preTransform(idt), isBoxedRef = false)
       case ReferenceToBoxed(idt) =>
         postTransform(preTransform(idt), isBoxedRef = true)
       case _ =>
         postTransform(preTransform(tree))
     }
-      
+
     /** Transform statements and add lifted definitions to them. */
     override def transformStats(stats: List[Tree], exprOwner: Symbol): List[Tree] = {
       def addLifted(stat: Tree): Tree = stat match {

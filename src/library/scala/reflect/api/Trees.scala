@@ -14,6 +14,7 @@ trait Trees { self: Universe =>
   private[scala] var nodeCount = 0
 
   type Modifiers >: Null <: AbsModifiers
+  val NoMods: Modifiers
 
   abstract class AbsModifiers {
     def modifiers: Set[Modifier]
@@ -74,11 +75,20 @@ trait Trees { self: Universe =>
     val id = nodeCount
     nodeCount += 1
 
-    private[this] var rawpos: Position = NoPosition
+    /** Prefix under which to print this tree type.  Defaults to product
+     *  prefix (e.g. DefTree) but because that is used in reification
+     *  it cannot be altered without breaking reflection.
+     */
+    def printingPrefix = productPrefix
 
-    def pos = rawpos
-    def pos_=(pos: Position) = rawpos = pos
-    def setPos(pos: Position): this.type = { rawpos = pos; this }
+    def pos: Position = rawatt.pos.asInstanceOf[Position] // [Eugene] how do we get rid of this cast?
+    def pos_=(pos: Position): Unit = rawatt = (rawatt withPos pos) // the "withPos" part is crucial to robustness
+    def setPos(newpos: Position): this.type = { pos = newpos; this }
+
+    private[this] var rawatt: Attachment = NoPosition
+    def attachment: Attachment = rawatt
+    def attachment_=(att: Attachment): Unit = rawatt = att
+    def setAttachment(att: Attachment): this.type = { rawatt = att; this }
 
     private[this] var rawtpe: Type = _
 
@@ -130,6 +140,7 @@ trait Trees { self: Universe =>
     def hasSymbol = false
     def isDef = false
     def isEmpty = false
+    def orElse(alt: => Tree) = if (!isEmpty) this else alt
 
     def hasSymbolWhich(f: Symbol => Boolean) = hasSymbol && f(symbol)
 
@@ -159,10 +170,18 @@ trait Trees { self: Universe =>
     def foreach(f: Tree => Unit) { new ForeachTreeTraverser(f).traverse(this) }
 
     /** Find all subtrees matching predicate `p` */
-    def filter(f: Tree => Boolean): List[Tree] = {
+    def withFilter(f: Tree => Boolean): List[Tree] = {
       val ft = new FilterTreeTraverser(f)
       ft.traverse(this)
       ft.hits.toList
+    }
+    def filter(f: Tree => Boolean): List[Tree] = withFilter(f)
+
+    /** Apply `pf' to each subtree on which the function is defined */
+    def collect[T](pf: PartialFunction[Tree, T]): List[T] = {
+      val ctt = new CollectTreeTraverser[T](pf)
+      ctt.traverse(this)
+      ctt.results.toList
     }
 
     /** Returns optionally first tree (in a preorder traversal) which satisfies predicate `p`,
@@ -174,8 +193,11 @@ trait Trees { self: Universe =>
       ft.result
     }
 
-    /** Is there part of this tree which satisfies predicate `p`? */
+    /** Is there exists a part of this tree which satisfies predicate `p`? */
     def exists(p: Tree => Boolean): Boolean = !find(p).isEmpty
+
+    /** Do all parts of this tree satisfy predicate `p`? */
+    def forAll(p: Tree => Boolean): Boolean = find(!p(_)).isEmpty
 
     def equalsStructure(that : Tree) = equalsStructure0(that)(_ eq _)
     def equalsStructure0(that: Tree)(f: (Tree,Tree) => Boolean): Boolean =
@@ -216,7 +238,7 @@ trait Trees { self: Universe =>
       duplicateTree(this).asInstanceOf[this.type]
 
     private[scala] def copyAttrs(tree: Tree): this.type = {
-      pos = tree.pos
+      attachment = tree.attachment
       tpe = tree.tpe
       if (hasSymbol) symbol = tree.symbol
       this
@@ -226,6 +248,34 @@ trait Trees { self: Universe =>
     override def hashCode(): Int = System.identityHashCode(this)
     override def equals(that: Any) = this eq that.asInstanceOf[AnyRef]
   }
+
+  // [Eugene] uh-oh
+  // locker.comp:
+  //     [mkdir] Created dir: C:\Projects\Kepler\build\locker\classes\compiler
+  // [scalacfork] Compiling 471 files to C:\Projects\Kepler\build\locker\classes\compiler
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+  // [scalacfork] amb prefix: Importers.this.type#class Tree Importer.this.from.type#class Tree
+//  object Tree {
+//    // would be great if in future this generated an Expr[Magic]
+//    // where Magic is a magic untyped type that propagates through the entire quasiquote
+//    // and turns off typechecking whenever it's involved
+//    // that'd allow us to splice trees into quasiquotes and still have these qqs to be partially typechecked
+//    // see some exploration of these ideas here: https://github.com/xeno-by/alphakeplerdemo
+//    implicit def tree2expr(tree: Tree): Expr[Nothing] = Expr[Nothing](tree)
+//    implicit def expr2tree(expr: Expr[_]): Tree = expr.tree
+//
+//    // [Eugene] good idea?
+//    implicit def trees2exprs(trees: List[Tree]): List[Expr[Nothing]] = trees map tree2expr
+//    implicit def exprs2trees(exprs: List[Expr[_]]): List[Tree] = exprs map expr2tree
+//  }
 
   /** A tree for a term.  Not all terms are TermTrees; use isTerm
    *  to reliably identify terms.
@@ -249,6 +299,7 @@ trait Trees { self: Universe =>
    *  are in DefTrees.
    */
   trait RefTree extends SymTree {
+    def qualifier: Tree    // empty for Idents
     def name: Name
   }
 
@@ -283,7 +334,6 @@ trait Trees { self: Universe =>
       case ValDef(mods, _, _, _)    => if (mods hasModifier Modifier.mutable) "var" else "val"
       case _ => ""
     }
-    // final def hasFlag(mask: Long): Boolean = mods hasFlag mask
   }
 
   /** A packaging, such as `package pid { stats }`
@@ -305,11 +355,22 @@ trait Trees { self: Universe =>
   case class ClassDef(mods: Modifiers, name: TypeName, tparams: List[TypeDef], impl: Template)
        extends ImplDef
 
+  /** @param sym       the class symbol
+   *  @return          the implementation template
+   */
+  def ClassDef(sym: Symbol, impl: Template): ClassDef
+
   /** An object definition, e.g. `object Foo`.  Internally, objects are
    *  quite frequently called modules to reduce ambiguity.
    */
   case class ModuleDef(mods: Modifiers, name: TermName, impl: Template)
-       extends ImplDef
+        extends ImplDef
+
+  /**
+   *  @param sym       the class symbol
+   *  @param impl      the implementation template
+   */
+  def ModuleDef(sym: Symbol, impl: Template): ModuleDef
 
   /** A common base class for ValDefs and DefDefs.
    */
@@ -319,10 +380,19 @@ trait Trees { self: Universe =>
     def rhs: Tree
   }
 
-  /** A value definition (this includes vars as well, which differ from
-   *  vals only in having the MUTABLE flag set in their Modifiers.)
+  /** Broadly speaking, a value definition.  All these are encoded as ValDefs:
+   *
+   *   - immutable values, e.g. "val x"
+   *   - mutable values, e.g. "var x" - the MUTABLE flag set in mods
+   *   - lazy values, e.g. "lazy val x" - the LAZY flag set in mods
+   *   - method parameters, see vparamss in DefDef - the PARAM flag is set in mods
+   *   - explicit self-types, e.g. class A { self: Bar => } - !!! not sure what is set.
    */
   case class ValDef(mods: Modifiers, name: TermName, tpt: Tree, rhs: Tree) extends ValOrDefDef
+
+  def ValDef(sym: Symbol, rhs: Tree): ValDef
+
+  def ValDef(sym: Symbol): ValDef
 
   /** A method or macro definition.
    *  @param name   The name of the method or macro. Can be a type name in case this is a type macro
@@ -330,10 +400,26 @@ trait Trees { self: Universe =>
   case class DefDef(mods: Modifiers, name: Name, tparams: List[TypeDef],
                     vparamss: List[List[ValDef]], tpt: Tree, rhs: Tree) extends ValOrDefDef
 
+  def DefDef(sym: Symbol, mods: Modifiers, vparamss: List[List[ValDef]], rhs: Tree): DefDef
+
+  def DefDef(sym: Symbol, vparamss: List[List[ValDef]], rhs: Tree): DefDef
+
+  def DefDef(sym: Symbol, mods: Modifiers, rhs: Tree): DefDef
+
+  def DefDef(sym: Symbol, rhs: Tree): DefDef
+
+  def DefDef(sym: Symbol, rhs: List[List[Symbol]] => Tree): DefDef
+
   /** An abstract type, a type parameter, or a type alias.
    */
   case class TypeDef(mods: Modifiers, name: TypeName, tparams: List[TypeDef], rhs: Tree)
        extends MemberDef
+
+  /** A TypeDef node which defines given `sym` with given tight hand side `rhs`. */
+  def TypeDef(sym: Symbol, rhs: Tree): TypeDef
+
+  /** A TypeDef node which defines abstract type or type parameter for given `sym` */
+  def TypeDef(sym: Symbol): TypeDef
 
   /** A labelled expression.  Not expressible in language syntax, but
    *  generated by the compiler to simulate while/do-while loops, and
@@ -351,6 +437,8 @@ trait Trees { self: Universe =>
    */
   case class LabelDef(name: TermName, params: List[Ident], rhs: Tree)
        extends DefTree with TermTree
+
+  def LabelDef(sym: Symbol, params: List[Symbol], rhs: Tree): LabelDef
 
   /** Import selector
    *
@@ -390,18 +478,24 @@ trait Trees { self: Universe =>
     //   {
     //      def bar  // owner is local dummy
     //   }
-    // System.err.println("TEMPLATE: " + parents)
   }
 
   /** Block of expressions (semicolon separated expressions) */
   case class Block(stats: List[Tree], expr: Tree)
        extends TermTree
 
+  /** Block factory that flattens directly nested blocks.
+   */
+  def Block(stats: Tree*): Block
+
   /** Case clause in a pattern match, eliminated during explicitouter
    *  (except for occurrences in switch statements)
    */
   case class CaseDef(pat: Tree, guard: Tree, body: Tree)
        extends Tree
+
+  /** casedef shorthand */
+  def CaseDef(pat: Tree, body: Tree): CaseDef
 
   /** Alternatives of patterns, eliminated by explicitouter, except for
    *  occurrences in encoded Switch stmt (=remaining Match(CaseDef(...))
@@ -420,6 +514,8 @@ trait Trees { self: Universe =>
    */
   case class Bind(name: Name, body: Tree)
        extends DefTree
+
+  def Bind(sym: Symbol, body: Tree): Bind
 
   case class UnApply(fun: Tree, args: List[Tree])
        extends TermTree
@@ -471,9 +567,13 @@ trait Trees { self: Universe =>
   case class Try(block: Tree, catches: List[CaseDef], finalizer: Tree)
        extends TermTree
 
+  def Try(body: Tree, cases: (Tree, Tree)*): Try
+
   /** Throw expression */
   case class Throw(expr: Tree)
        extends TermTree
+
+  def Throw(tpe: Type, args: Tree*): Throw
 
   /** Object instantiation
    *  One should always use factory method below to build a user level new.
@@ -485,16 +585,13 @@ trait Trees { self: Universe =>
   /** Factory method for object creation `new tpt(args_1)...(args_n)`
    *  A `New(t, as)` is expanded to: `(new t).<init>(as)`
    */
-  def New(tpt: Tree, argss: List[List[Tree]]): Tree = {
-    // todo. we need to expose names in scala.reflect.api
-    val superRef: Tree = Select(New(tpt), nme.CONSTRUCTOR)
-    if (argss.isEmpty) Apply(superRef, Nil)
-    else (superRef /: argss) (Apply)
-  }
+  def New(tpt: Tree, argss: List[List[Tree]]): Tree
+
   /** 0-1 argument list new, based on a type.
    */
-  def New(tpe: Type, args: Tree*): Tree =
-    New(TypeTree(tpe), List(args.toList))
+  def New(tpe: Type, args: Tree*): Tree
+
+  def New(sym: Symbol, args: Tree*): Tree
 
   /** Type annotation, eliminated by explicit outer */
   case class Typed(expr: Tree, tpt: Tree)
@@ -529,9 +626,15 @@ trait Trees { self: Universe =>
     override def symbol_=(sym: Symbol) { fun.symbol = sym }
   }
 
+  def Apply(sym: Symbol, args: Tree*): Tree
+
   class ApplyToImplicitArgs(fun: Tree, args: List[Tree]) extends Apply(fun, args)
 
   class ApplyImplicitView(fun: Tree, args: List[Tree]) extends Apply(fun, args)
+
+  class ApplyConstructor(tpt: Tree, args: List[Tree]) extends Apply(Select(New(tpt), nme.CONSTRUCTOR), args) {
+    override def printingPrefix = "ApplyConstructor"
+  }
 
   /** Dynamic value application.
    *  In a dynamic application   q.f(as)
@@ -543,7 +646,9 @@ trait Trees { self: Universe =>
        extends TermTree with SymTree
     // The symbol of an ApplyDynamic is the function symbol of `qual`, or NoSymbol, if there is none.
 
-  /** Super reference, qual = corresponding this reference */
+  /** Super reference, qual = corresponding this reference
+   *  A super reference C.super[M] is represented as Super(This(C), M).
+   */
   case class Super(qual: Tree, mix: TypeName) extends TermTree {
     // The symbol of a Super is the class _from_ which the super reference is made.
     // For instance in C.super(...), it would be C.
@@ -551,35 +656,46 @@ trait Trees { self: Universe =>
     override def symbol_=(sym: Symbol) { qual.symbol = sym }
   }
 
+  def Super(sym: Symbol, mix: TypeName): Tree
+
   /** Self reference */
   case class This(qual: TypeName)
         extends TermTree with SymTree
     // The symbol of a This is the class to which the this refers.
     // For instance in C.this, it would be C.
 
-  def This(sym: Symbol): Tree =
-    This(sym.name.toTypeName) setSymbol sym
+  def This(sym: Symbol): Tree
 
   /** Designator <qualifier> . <name> */
   case class Select(qualifier: Tree, name: Name)
        extends RefTree
 
-  def Select(qualifier: Tree, name: String): Select =
-    Select(qualifier, newTermName(name))
+  def Select(qualifier: Tree, name: String): Select
 
-  def Select(qualifier: Tree, sym: Symbol): Select =
-    Select(qualifier, sym.name) setSymbol sym
+  def Select(qualifier: Tree, sym: Symbol): Select
 
   /** Identifier <name> */
-  case class Ident(name: Name) extends RefTree
+  case class Ident(name: Name) extends RefTree {
+    def qualifier: Tree = EmptyTree
+  }
 
-  def Ident(name: String): Ident =
-    Ident(newTermName(name))
+  def Ident(name: String): Ident
 
-  def Ident(sym: Symbol): Ident =
-    Ident(sym.name) setSymbol sym
+  def Ident(sym: Symbol): Ident
 
   class BackQuotedIdent(name: Name) extends Ident(name)
+
+  /** Marks underlying reference to id as boxed.
+   *  @pre: id must refer to a captured variable
+   *  A reference such marked will refer to the boxed entity, no dereferencing
+   *  with `.elem` is done on it.
+   *  This tree node can be emitted by macros such as reify that call referenceCapturedVariable.
+   *  It is eliminated in LambdaLift, where the boxing conversion takes place.
+   */
+  case class ReferenceToBoxed(ident: Ident) extends TermTree {
+    override def symbol: Symbol = ident.symbol
+    override def symbol_=(sym: Symbol) { ident.symbol = sym }
+  }
 
   /** Literal */
   case class Literal(value: Constant)
@@ -741,6 +857,12 @@ trait Trees { self: Universe =>
     case t =>
       sys.error("Not a ClassDef: " + t + "/" + t.getClass)
   }
+  def deriveModuleDef(mdef: Tree)(applyToImpl: Template => Template): ModuleDef = mdef match {
+    case ModuleDef(mods0, name0, impl0) =>
+      treeCopy.ModuleDef(mdef, mods0, name0, applyToImpl(impl0))
+    case t =>
+      sys.error("Not a ModuleDef: " + t + "/" + t.getClass)
+  }
   def deriveCaseDef(cdef: Tree)(applyToBody: Tree => Tree): CaseDef = cdef match {
     case CaseDef(pat0, guard0, body0) =>
       treeCopy.CaseDef(cdef, pat0, guard0, applyToBody(body0))
@@ -845,6 +967,8 @@ trait Trees { self: Universe =>
         traverse(qualifier)
       case Ident(_) =>
         ;
+      case ReferenceToBoxed(idt) =>
+        traverse(idt)
       case Literal(_) =>
         ;
       case TypeTree() =>
@@ -930,6 +1054,7 @@ trait Trees { self: Universe =>
     def This(tree: Tree, qual: Name): This
     def Select(tree: Tree, qualifier: Tree, selector: Name): Select
     def Ident(tree: Tree, name: Name): Ident
+    def ReferenceToBoxed(tree: Tree, idt: Ident): ReferenceToBoxed
     def Literal(tree: Tree, value: Constant): Literal
     def TypeTree(tree: Tree): TypeTree
     def Annotated(tree: Tree, annot: Tree, arg: Tree): Annotated
@@ -1012,6 +1137,8 @@ trait Trees { self: Universe =>
       new Select(qualifier, selector).copyAttrs(tree)
     def Ident(tree: Tree, name: Name) =
       new Ident(name).copyAttrs(tree)
+    def ReferenceToBoxed(tree: Tree, idt: Ident) =
+      new ReferenceToBoxed(idt).copyAttrs(tree)
     def Literal(tree: Tree, value: Constant) =
       new Literal(value).copyAttrs(tree)
     def TypeTree(tree: Tree) =
@@ -1200,6 +1327,11 @@ trait Trees { self: Universe =>
       if name0 == name => t
       case _ => treeCopy.Ident(tree, name)
     }
+    def ReferenceToBoxed(tree: Tree, idt: Ident) = tree match {
+      case t @ ReferenceToBoxed(idt0)
+      if (idt0 == idt) => t
+      case _ => this.treeCopy.ReferenceToBoxed(tree, idt)
+    }
     def Literal(tree: Tree, value: Constant) = tree match {
       case t @ Literal(value0)
       if value0 == value => t
@@ -1344,6 +1476,8 @@ trait Trees { self: Universe =>
         treeCopy.Select(tree, transform(qualifier), selector)
       case Ident(name) =>
         treeCopy.Ident(tree, name)
+      case ReferenceToBoxed(idt) =>
+        treeCopy.ReferenceToBoxed(tree, transform(idt) match { case idt1: Ident => idt1 })
       case Literal(value) =>
         treeCopy.Literal(tree, value)
       case TypeTree() =>
@@ -1385,7 +1519,7 @@ trait Trees { self: Universe =>
     def transformStats(stats: List[Tree], exprOwner: Symbol): List[Tree] =
       stats mapConserve (stat =>
         if (exprOwner != currentOwner && stat.isTerm) atOwner(exprOwner)(transform(stat))
-        else transform(stat)) filter (EmptyTree !=)
+        else transform(stat)) filter (EmptyTree != _)
     def transformModifiers(mods: Modifiers): Modifiers =
       mods.mapAnnotations(transformTrees)
 
@@ -1411,6 +1545,14 @@ trait Trees { self: Universe =>
     val hits = new ListBuffer[Tree]
     override def traverse(t: Tree) {
       if (p(t)) hits += t
+      super.traverse(t)
+    }
+  }
+
+  class CollectTreeTraverser[T](pf: PartialFunction[Tree, T]) extends Traverser {
+    val results = new ListBuffer[T]
+    override def traverse(t: Tree) {
+      if (pf.isDefinedAt(t)) results += pf(t)
       super.traverse(t)
     }
   }
@@ -1507,7 +1649,7 @@ trait Trees { self: Universe =>
   case ApplyDynamic(qual, args)                                   (introduced by erasure, eliminated by cleanup)
     // fun(args)
   case Super(qual, mix) =>
-    // qual.super[mix]     if qual and/or mix is empty, ther are tpnme.EMPTY
+    // qual.super[mix]     qual is always This(something), if mix is empty, it is tpnme.EMPTY
   case This(qual) =>
     // qual.this
   case Select(qualifier, selector) =>
@@ -1516,6 +1658,10 @@ trait Trees { self: Universe =>
     // name
     // note: type checker converts idents that refer to enclosing fields or methods
     // to selects; name ==> this.name
+  case ReferenceToBoxed(ident) =>                                 (created by typer, eliminated by lambdalift)
+    // synthetic node emitted by macros to reference capture vars directly without going through ``elem''
+    // var x = ...; fun { x } will emit Ident(x), which gets transformed to Select(Ident(x), "elem")
+    // if ReferenceToBoxed were used instead of Ident, no transformation would be performed
   case Literal(value) =>
     // value
   case TypeTree() =>                                              (introduced by refcheck)

@@ -22,10 +22,10 @@ trait NameManglers {
 
     val MODULE_SUFFIX_STRING = NameTransformer.MODULE_SUFFIX_STRING
     val NAME_JOIN_STRING     = NameTransformer.NAME_JOIN_STRING
-    
+
     val MODULE_SUFFIX_NAME: TermName = newTermName(MODULE_SUFFIX_STRING)
     val NAME_JOIN_NAME: TermName     = newTermName(NAME_JOIN_STRING)
-    
+
     def flattenedName(segments: Name*): NameType = compactedString(segments mkString NAME_JOIN_STRING)
 
     /**
@@ -79,10 +79,10 @@ trait NameManglers {
     val SUPER_PREFIX_STRING           = "super$"
     val TRAIT_SETTER_SEPARATOR_STRING = "$_setter_$"
     val SETTER_SUFFIX: TermName = encode("_=")
-    
-    @deprecated("2.10.0", "Use SPECIALIZED_SUFFIX")
+
+    @deprecated("Use SPECIALIZED_SUFFIX", "2.10.0")
     def SPECIALIZED_SUFFIX_STRING = SPECIALIZED_SUFFIX.toString
-    @deprecated("2.10.0", "Use SPECIALIZED_SUFFIX")
+    @deprecated("Use SPECIALIZED_SUFFIX", "2.10.0")
     def SPECIALIZED_SUFFIX_NAME: TermName = SPECIALIZED_SUFFIX.toTermName
 
     def isConstructorName(name: Name)       = name == CONSTRUCTOR || name == MIXIN_CONSTRUCTOR
@@ -121,19 +121,14 @@ trait NameManglers {
         name.subName(i, name.length)
       } else name
     }
-    
+
     def unspecializedName(name: Name): Name = (
       if (name endsWith SPECIALIZED_SUFFIX)
         name.subName(0, name.lastIndexOf('m') - 1)
       else name
     )
-    
-    def macroMethodName(name: Name) = {
-      val base = if (name.isTypeName) nme.TYPEkw else nme.DEFkw
-      base append nme.MACRO append name
-    }
 
-    /** Return the original name and the types on which this name
+   /** Return the original name and the types on which this name
      *  is specialized. For example,
      *  {{{
      *     splitSpecializedName("foo$mIcD$sp") == ('foo', "I", "D")
@@ -158,7 +153,7 @@ trait NameManglers {
     def getterToLocal(name: TermName): TermName  = name append LOCAL_SUFFIX_STRING
     def getterToSetter(name: TermName): TermName = name append SETTER_SUFFIX
     def localToGetter(name: TermName): TermName  = name dropRight LOCAL_SUFFIX_STRING.length
-    
+
     def dropLocalSuffix(name: Name): Name  = if (name endsWith ' ') name dropRight 1 else name
 
     def setterToGetter(name: TermName): TermName = {
@@ -179,9 +174,6 @@ trait NameManglers {
       else name.toTermName
     }
 
-    // This isn't needed at the moment since I fixed $class$1 but
-    // I expect it will be at some point.
-    //
     // def anonNumberSuffix(name: Name): Name = {
     //   ("" + name) lastIndexOf '$' match {
     //     case -1   => nme.EMPTY
@@ -191,6 +183,18 @@ trait NameManglers {
     //       else nme.EMPTY
     //   }
     // }
+
+    // If the name ends with $nn where nn are
+    // all digits, strip the $ and the digits.
+    // Otherwise return the argument.
+    def stripAnonNumberSuffix(name: Name): Name = {
+      var pos = name.length
+      while (pos > 0 && name(pos - 1).isDigit)
+        pos -= 1
+
+      if (pos <= 0 || pos == name.length || name(pos - 1) != '$') name
+      else name.subName(0, pos - 1)
+    }
 
     def stripModuleSuffix(name: Name): Name = (
       if (isModuleName(name)) name dropRight MODULE_SUFFIX_STRING.length else name

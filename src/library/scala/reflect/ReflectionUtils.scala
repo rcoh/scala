@@ -27,15 +27,35 @@ object ReflectionUtils {
     case ex if pf isDefinedAt unwrapThrowable(ex)   => pf(unwrapThrowable(ex))
   }
 
-  def singletonInstance(className: String, cl: ClassLoader = getClass.getClassLoader): AnyRef = {
+  def defaultReflectionClassLoader() = {
+    // say no to non-determinism of mirror classloaders
+    // default classloader will be instantiated using current system classloader
+    // if you wish so, you can rebind it by setting ``mirror.classLoader'' to whatever is necessary
+//    val cl = Thread.currentThread.getContextClassLoader
+//    if (cl == null) getClass.getClassLoader else cl
+//    cl
+    getClass.getClassLoader
+  }
+
+  def singletonInstance(cl: ClassLoader, className: String): AnyRef = {
     val name = if (className endsWith "$") className else className + "$"
-    val clazz = java.lang.Class.forName(name, true, cl) 
+    val clazz = java.lang.Class.forName(name, true, cl)
     val singleton = clazz getField "MODULE$" get null
     singleton
   }
 
   // Retrieves the MODULE$ field for the given class name.
-  def singletonInstanceOpt(className: String, cl: ClassLoader = getClass.getClassLoader): Option[AnyRef] = 
-    try Some(singletonInstance(className, cl))
+  def singletonInstanceOpt(cl: ClassLoader, className: String): Option[AnyRef] =
+    try Some(singletonInstance(cl, className))
+    catch { case _: ClassNotFoundException  => None }
+
+  def invokeFactory(cl: ClassLoader, className: String, methodName: String, args: AnyRef*): AnyRef = {
+    val singleton = singletonInstance(cl, className)
+    val method = singleton.getClass.getMethod(methodName, classOf[ClassLoader])
+    method.invoke(singleton, args: _*)
+  }
+
+  def invokeFactoryOpt(cl: ClassLoader, className: String, methodName: String, args: AnyRef*): Option[AnyRef] =
+    try Some(invokeFactory(cl, className, methodName, args: _*))
     catch { case _: ClassNotFoundException  => None }
 }

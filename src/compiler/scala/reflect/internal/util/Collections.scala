@@ -10,6 +10,8 @@ import scala.annotation.tailrec
 import mutable.ListBuffer
 
 /** Profiler driven changes.
+ *  TODO - inlining doesn't work from here because of the bug that
+ *  methods in traits aren't inlined.
  */
 trait Collections {
   /** True if all three arguments have the same number of elements and
@@ -64,7 +66,7 @@ trait Collections {
     }
     lb.toList
   }
-  
+
   final def foreachWithIndex[A, B](xs: List[A])(f: (A, Int) => Unit) {
     var index = 0
     var ys = xs
@@ -73,6 +75,11 @@ trait Collections {
       ys = ys.tail
       index += 1
     }
+  }
+  
+  // @inline
+  final def findOrElse[A](xs: TraversableOnce[A])(p: A => Boolean)(orElse: => A): A = {
+    xs find p getOrElse orElse
   }
 
   final def mapWithIndex[A, B](xs: List[A])(f: (A, Int) => B): List[B] = {
@@ -98,7 +105,7 @@ trait Collections {
       val x2 = ys2.head
       if (p(x1, x2))
         buf += ((x1, x2))
-      
+
       ys1 = ys1.tail
       ys2 = ys2.tail
     }
@@ -130,7 +137,7 @@ trait Collections {
     while (!ys1.isEmpty && !ys2.isEmpty) {
       if (f(ys1.head, ys2.head))
         return true
-      
+
       ys1 = ys1.tail
       ys2 = ys2.tail
     }
@@ -142,7 +149,7 @@ trait Collections {
     while (!ys1.isEmpty && !ys2.isEmpty) {
       if (!f(ys1.head, ys2.head))
         return false
-      
+
       ys1 = ys1.tail
       ys2 = ys2.tail
     }
@@ -155,7 +162,7 @@ trait Collections {
     while (!ys1.isEmpty && !ys2.isEmpty && !ys3.isEmpty) {
       if (!f(ys1.head, ys2.head, ys3.head))
         return false
-      
+
       ys1 = ys1.tail
       ys2 = ys2.tail
       ys3 = ys3.tail

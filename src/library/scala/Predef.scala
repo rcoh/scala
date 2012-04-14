@@ -14,6 +14,7 @@ import mutable.ArrayOps
 import generic.CanBuildFrom
 import annotation.{ elidable, implicitNotFound }
 import annotation.elidable.ASSERTION
+import language.{implicitConversions, existentials}
 
 /** The `Predef` object provides definitions that are accessible in all Scala
  *  compilation units without explicit qualification.
@@ -99,16 +100,39 @@ object Predef extends LowPriorityImplicits {
   // def AnyRef = scala.AnyRef
 
   // Manifest types, companions, and incantations for summoning
+  @deprecated("Use `@scala.reflect.ClassTag` instead", "2.10.0")
   type ClassManifest[T] = scala.reflect.ClassManifest[T]
-  type Manifest[T]      = scala.reflect.Manifest[T]
+  @deprecated("OptManifest is no longer supported and using it may lead to incorrect results, use `@scala.reflect.TypeTag` instead", "2.10.0")
   type OptManifest[T]   = scala.reflect.OptManifest[T]
+  @deprecated("Use `@scala.reflect.ConcreteTypeTag` instead", "2.10.0")
+  type Manifest[T]      = scala.reflect.Manifest[T]
+  @deprecated("Use `@scala.reflect.ClassTag` instead", "2.10.0")
   val ClassManifest     = scala.reflect.ClassManifest
-  val Manifest          = scala.reflect.Manifest
-  val NoManifest        = scala.reflect.NoManifest
+  // [Paul to Eugene] No lazy vals in Predef.  Too expensive.  Have to work harder on breaking initialization dependencies.
+  @deprecated("Use `@scala.reflect.ConcreteTypeTag` instead", "2.10.0")
+  lazy val Manifest     = scala.reflect.Manifest // needs to be lazy, because requires scala.reflect.mirror instance
+  @deprecated("NoManifest is no longer supported and using it may lead to incorrect results, use `@scala.reflect.TypeTag` instead", "2.10.0")
+  lazy val NoManifest   = scala.reflect.NoManifest // needs to be lazy, because requires scala.reflect.mirror instance
 
   def manifest[T](implicit m: Manifest[T])           = m
   def classManifest[T](implicit m: ClassManifest[T]) = m
   def optManifest[T](implicit m: OptManifest[T])     = m
+
+  // Tag types and companions, and incantations for summoning
+  type ClassTag[T]         = scala.reflect.ClassTag[T]
+  type TypeTag[T]          = scala.reflect.TypeTag[T]
+  type ConcreteTypeTag[T]  = scala.reflect.ConcreteTypeTag[T]
+  val ClassTag             = scala.reflect.ClassTag // doesn't need to be lazy, because it's not a path-dependent type
+  // [Paul to Eugene] No lazy vals in Predef.  Too expensive.  Have to work harder on breaking initialization dependencies.
+  lazy val TypeTag         = scala.reflect.TypeTag // needs to be lazy, because requires scala.reflect.mirror instance
+  lazy val ConcreteTypeTag = scala.reflect.ConcreteTypeTag
+
+  // [Eugene to Martin] it's really tedious to type "implicitly[...]" all the time, so I'm reintroducing these shortcuts
+  def classTag[T](implicit ctag: ClassTag[T])                = ctag
+  def tag[T](implicit ttag: TypeTag[T])                      = ttag
+  def typeTag[T](implicit ttag: TypeTag[T])                  = ttag
+  def concreteTag[T](implicit cttag: ConcreteTypeTag[T])     = cttag
+  def concreteTypeTag[T](implicit cttag: ConcreteTypeTag[T]) = cttag
 
   // Minor variations on identity functions
   def identity[A](x: A): A         = x    // @see `conforms` for the implicit version
@@ -215,7 +239,7 @@ object Predef extends LowPriorityImplicits {
       throw new IllegalArgumentException("requirement failed: "+ message)
   }
 
-  final class Ensuring[A](val __resultOfEnsuring: A) {
+  final class Ensuring[A](val __resultOfEnsuring: A) extends AnyVal {
     // `__resultOfEnsuring` must be a public val to allow inlining.
     // See comments in ArrowAssoc for more.
     @deprecated("Use __resultOfEnsuring instead", "2.10.0")
@@ -226,7 +250,7 @@ object Predef extends LowPriorityImplicits {
     def ensuring(cond: A => Boolean): A = { assert(cond(__resultOfEnsuring)); __resultOfEnsuring }
     def ensuring(cond: A => Boolean, msg: => Any): A = { assert(cond(__resultOfEnsuring), msg); __resultOfEnsuring }
   }
-  implicit def any2Ensuring[A](x: A): Ensuring[A] = new Ensuring(x)
+  @inline implicit def any2Ensuring[A](x: A): Ensuring[A] = new Ensuring(x)
 
   /** `???` can be used for marking methods that remain to be implemented.
    *  @throws  A `NotImplementedError`
@@ -247,7 +271,7 @@ object Predef extends LowPriorityImplicits {
     def unapply[A, B, C](x: Tuple3[A, B, C]): Option[Tuple3[A, B, C]] = Some(x)
   }
 
-  final class ArrowAssoc[A](val __leftOfArrow: A) {
+  final class ArrowAssoc[A](val __leftOfArrow: A) extends AnyVal {
     // `__leftOfArrow` must be a public val to allow inlining. The val
     // used to be called `x`, but now goes by `__leftOfArrow`, as that
     // reduces the chances of a user's writing `foo.__leftOfArrow` and
@@ -260,7 +284,7 @@ object Predef extends LowPriorityImplicits {
     @inline def -> [B](y: B): Tuple2[A, B] = Tuple2(__leftOfArrow, y)
     def →[B](y: B): Tuple2[A, B] = ->(y)
   }
-  implicit def any2ArrowAssoc[A](x: A): ArrowAssoc[A] = new ArrowAssoc(x)
+  @inline implicit def any2ArrowAssoc[A](x: A): ArrowAssoc[A] = new ArrowAssoc(x)
 
   // printing and reading -----------------------------------------------
 
@@ -386,7 +410,8 @@ object Predef extends LowPriorityImplicits {
   // Strings and CharSequences --------------------------------------------------------------
 
   implicit def any2stringadd(x: Any) = new runtime.StringAdd(x)
-  implicit def augmentString(x: String): StringOps = new StringOps(x)
+  @inline implicit def any2stringfmt(x: Any) = new runtime.StringFormat(x)
+  @inline implicit def augmentString(x: String): StringOps = new StringOps(x)
   implicit def unaugmentString(x: StringOps): String = x.repr
 
   implicit def stringCanBuildFrom: CanBuildFrom[String, Char, String] =

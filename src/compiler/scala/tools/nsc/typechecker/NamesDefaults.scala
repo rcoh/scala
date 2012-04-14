@@ -8,6 +8,7 @@ package typechecker
 
 import symtab.Flags._
 import scala.collection.mutable
+import scala.ref.WeakReference
 
 /**
  *  @author Lukas Rytz
@@ -20,7 +21,7 @@ trait NamesDefaults { self: Analyzer =>
   import NamesDefaultsErrorsGen._
 
   val defaultParametersOfMethod =
-    perRunCaches.newWeakMap[Symbol, Set[Symbol]]() withDefaultValue Set()
+    perRunCaches.newWeakMap[Symbol, Set[WeakReference[Symbol]]]() withDefaultValue Set()
 
   case class NamedApplyInfo(
     qual:       Option[Tree],
@@ -47,7 +48,7 @@ trait NamesDefaults { self: Analyzer =>
   /** @param pos maps indices from new to old (!) */
   def reorderArgsInv[T: ClassManifest](args: List[T], pos: Int => Int): List[T] = {
     val argsArray = args.toArray
-    argsArray.indices map (i => argsArray(pos(i))) toList
+    (argsArray.indices map (i => argsArray(pos(i)))).toList
   }
 
   /** returns `true` if every element is equal to its index */
@@ -224,7 +225,7 @@ trait NamesDefaults { self: Analyzer =>
         case Select(sp @ Super(_, _), _) if isConstr =>
           // 'moduleQual' fixes #3207. selection of the companion module of the
           // superclass needs to have the same prefix as the superclass.
-          blockWithoutQualifier(moduleQual(baseFun.pos, sp.symbol.tpe.parents.head))
+          blockWithoutQualifier(moduleQual(baseFun.pos, sp.symbol.tpe.firstParent))
 
         // self constructor calls (in secondary constructors)
         case Select(tp, name) if isConstr =>
@@ -377,7 +378,7 @@ trait NamesDefaults { self: Analyzer =>
                   pos: util.Position, context: Context): (List[Tree], List[Symbol]) = {
     if (givenArgs.length < params.length) {
       val (missing, positional) = missingParams(givenArgs, params)
-      if (missing forall (_.hasDefaultFlag)) {
+      if (missing forall (_.hasDefault)) {
         val defaultArgs = missing flatMap (p => {
           val defGetter = defaultGetter(p, context)
           // TODO #3649 can create spurious errors when companion object is gone (because it becomes unlinked from scope)
@@ -399,7 +400,7 @@ trait NamesDefaults { self: Analyzer =>
           }
         })
         (givenArgs ::: defaultArgs, Nil)
-      } else (givenArgs, missing filterNot (_.hasDefaultFlag))
+      } else (givenArgs, missing filterNot (_.hasDefault))
     } else (givenArgs, Nil)
   }
 
@@ -428,11 +429,11 @@ trait NamesDefaults { self: Analyzer =>
       }
     } else NoSymbol
   }
-  
+
   private def savingUndeterminedTParams[T](context: Context)(fn: List[Symbol] => T): T = {
     val savedParams    = context.extractUndetparams()
     val savedReporting = context.ambiguousErrors
-    
+
     context.setAmbiguousErrors(false)
     try fn(savedParams)
     finally {
@@ -451,7 +452,7 @@ trait NamesDefaults { self: Analyzer =>
       || (ctx.owner.rawInfo.member(name) != NoSymbol)
     )
   )
-  
+
   /** A full type check is very expensive; let's make sure there's a name
    *  somewhere which could potentially be ambiguous before we go that route.
    */
@@ -519,7 +520,7 @@ trait NamesDefaults { self: Analyzer =>
           def matchesName(param: Symbol) = !param.isSynthetic && (
             (param.name == name) || (param.deprecatedParamName match {
               case Some(`name`) =>
-                context0.unit.deprecationWarning(arg.pos, 
+                context0.unit.deprecationWarning(arg.pos,
                   "the parameter name "+ name +" has been deprecated. Use "+ param.name +" instead.")
                 true
               case _ => false

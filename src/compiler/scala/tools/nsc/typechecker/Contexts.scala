@@ -21,7 +21,7 @@ trait Contexts { self: Analyzer =>
     outer      = this
     enclClass  = this
     enclMethod = this
-    
+
     override def nextEnclosing(p: Context => Boolean): Context = this
     override def enclosingContextChain: List[Context] = Nil
     override def implicitss: List[List[ImplicitInfo]] = Nil
@@ -43,8 +43,7 @@ trait Contexts { self: Analyzer =>
    *  - if option `-Yno-imports` is given, nothing is imported
    *  - if the unit is java defined, only `java.lang` is imported
    *  - if option `-Yno-predef` is given, if the unit body has an import of Predef
-   *    among its leading imports, or if the tree is [[scala.ScalaObject]]
-   *    or [[scala.Predef]], `Predef` is not imported.
+   *    among its leading imports, or if the tree is [[scala.Predef]], `Predef` is not imported.
    */
   protected def rootImports(unit: CompilationUnit): List[Symbol] = {
     import definitions._
@@ -106,8 +105,8 @@ trait Contexts { self: Analyzer =>
                                                     // not inherited to child contexts
     var depth: Int = 0
     var imports: List[ImportInfo] = List()   // currently visible imports
-    var openImplicits: List[(Type,Symbol)] = List()   // types for which implicit arguments
-                                             // are currently searched
+    var openImplicits: List[(Type,Tree)] = List()   // types for which implicit arguments
+                                                    // are currently searched
     // for a named application block (Tree) the corresponding NamedApplyInfo
     var namedApplyBlockInfo: Option[(Tree, NamedApplyInfo)] = None
     var prefix: Type = NoPrefix
@@ -120,6 +119,7 @@ trait Contexts { self: Analyzer =>
 
     var diagnostic: List[String] = Nil      // these messages are printed when issuing an error
     var implicitsEnabled = false
+    var macrosEnabled = true
     var checking = false
     var retyping = false
 
@@ -128,7 +128,7 @@ trait Contexts { self: Analyzer =>
 
     var typingIndentLevel: Int = 0
     def typingIndent = "  " * typingIndentLevel
-    
+
     var buffer: Set[AbsTypeError] = _
 
     def enclClassOrMethod: Context =
@@ -179,14 +179,35 @@ trait Contexts { self: Analyzer =>
       buffer.clear()
       current
     }
-    
+
     def logError(err: AbsTypeError) = buffer += err
+
+    def withImplicitsEnabled[T](op: => T): T = {
+      val saved = implicitsEnabled
+      implicitsEnabled = true
+      try op
+      finally implicitsEnabled = saved
+    }
 
     def withImplicitsDisabled[T](op: => T): T = {
       val saved = implicitsEnabled
       implicitsEnabled = false
       try op
       finally implicitsEnabled = saved
+    }
+
+    def withMacrosEnabled[T](op: => T): T = {
+      val saved = macrosEnabled
+      macrosEnabled = true
+      try op
+      finally macrosEnabled = saved
+    }
+
+    def withMacrosDisabled[T](op: => T): T = {
+      val saved = macrosEnabled
+      macrosEnabled = false
+      try op
+      finally macrosEnabled = saved
     }
 
     def make(unit: CompilationUnit, tree: Tree, owner: Symbol,
@@ -224,6 +245,7 @@ trait Contexts { self: Analyzer =>
       c.diagnostic = this.diagnostic
       c.typingIndentLevel = typingIndentLevel
       c.implicitsEnabled = this.implicitsEnabled
+      c.macrosEnabled = this.macrosEnabled
       c.checking = this.checking
       c.retyping = this.retyping
       c.openImplicits = this.openImplicits
@@ -238,9 +260,10 @@ trait Contexts { self: Analyzer =>
       val c = make(unit, EmptyTree, owner, scope, imports)
       c.setReportErrors()
       c.implicitsEnabled = true
+      c.macrosEnabled = true
       c
     }
-    
+
     def makeNewImport(sym: Symbol): Context =
       makeNewImport(gen.mkWildcardImport(sym))
 
@@ -312,13 +335,16 @@ trait Contexts { self: Analyzer =>
       unit.error(pos, if (checking) "\n**** ERROR DURING INTERNAL CHECKING ****\n" + msg else msg)
 
     def issue(err: AbsTypeError) {
-      if (settings.debug.value) println("issue error: " + err.errMsg)
+      debugwarn("issue error: " + err.errMsg)
+      if (settings.Yissuedebug.value) (new Exception).printStackTrace()
       if (reportErrors) unitError(err.errPos, addDiagString(err.errMsg))
       else if (bufferErrors) { buffer += err }
       else throw new TypeError(err.errPos, err.errMsg)
     }
 
     def issueAmbiguousError(pre: Type, sym1: Symbol, sym2: Symbol, err: AbsTypeError) {
+      debugwarn("issue ambiguous error: " + err.errMsg)
+      if (settings.Yissuedebug.value) (new Exception).printStackTrace()
       if (ambiguousErrors) {
         if (!pre.isErroneous && !sym1.isErroneous && !sym2.isErroneous)
           unitError(err.errPos, err.errMsg)
@@ -327,6 +353,8 @@ trait Contexts { self: Analyzer =>
     }
 
     def issueAmbiguousError(err: AbsTypeError) {
+      debugwarn("issue ambiguous error: " + err.errMsg)
+      if (settings.Yissuedebug.value) (new Exception).printStackTrace()
       if (ambiguousErrors)
         unitError(err.errPos, addDiagString(err.errMsg))
       else if (bufferErrors) { buffer += err }
@@ -663,7 +691,7 @@ trait Contexts { self: Analyzer =>
       case List(ImportSelector(nme.WILDCARD, _, _, _)) => List(sym)
       case ImportSelector(from, _, to, _) :: _ if from == sym.name =>
         if (to == nme.WILDCARD) List()
-        else { val sym1 = sym.cloneSymbol; sym1.name = to; List(sym1) }
+        else List(sym.cloneSymbol(sym.owner, sym.rawflags, to))
       case _ :: rest => transformImport(rest, sym)
     }
 

@@ -7,6 +7,10 @@ trait Symbols { self: Universe =>
 
   abstract class AbsSymbol { this: Symbol =>
 
+    /** The position of this symbol
+     */
+    def pos: Position
+
     /** The modifiers of this symbol
      */
     def modifiers: Set[Modifier]
@@ -18,7 +22,7 @@ trait Symbols { self: Universe =>
     /** A list of annotations attached to this Symbol.
      */
     def annotations: List[self.AnnotationInfo]
-    
+
     /** Whether this symbol carries an annotation for which the given
      *  symbol is its typeSymbol.
      */
@@ -46,6 +50,10 @@ trait Symbols { self: Universe =>
 
     /** An id number which is unique for all symbols in this universe */
     def id: Int
+
+    /** ...
+     */
+    def orElse[T](alt: => Symbol): Symbol
 
     /**
      * Set when symbol has a modifier of the form private[X], NoSymbol otherwise.
@@ -99,7 +107,7 @@ trait Symbols { self: Universe =>
      *  method, or `NoSymbol` if none exists.
      */
     def enclosingMethod: Symbol
-    
+
     /** If this symbol is a package class, this symbol; otherwise the next enclosing
      *  package class, or `NoSymbol` if none exists.
      */
@@ -111,6 +119,20 @@ trait Symbols { self: Universe =>
      *  or `sym.isType` is true.
      */
     def isTerm         : Boolean
+
+    /** Does this symbol represent the definition of method?
+     *  If yes, `isTerm` is also guaranteed to be true.
+     */
+    def isMethod       : Boolean
+
+    /** Is this symbol an overloaded method?
+     */
+    def isOverloaded   : Boolean
+
+    /** Does this symbol represent a free term captured by reification?
+     */
+    // needed for ones who wish to inspect reified trees
+    def isFreeTerm     : Boolean
 
     /** Does this symbol represent the definition of type?
      *  Note that every symbol is either a term or a type.
@@ -124,6 +146,17 @@ trait Symbols { self: Universe =>
      */
     def isClass        : Boolean
 
+    /** Does this symbol represent the definition of a primitive class?
+     *  Namely, is it one of [[scala.Double]], [[scala.Float]], [[scala.Long]], [[scala.Int]], [[scala.Char]],
+     *  [[scala.Short]], [[scala.Byte]], [[scala.Unit]] or [[scala.Boolean]]?
+     */
+    def isPrimitiveValueClass: Boolean
+
+    /** Does this symbol represent the definition of a custom value class?
+     *  Namely, is AnyVal among its parent classes?
+     */
+    def isDerivedValueClass: Boolean
+
     /** Does this symbol represent the definition of a type alias?
      *  If yes, `isType` is also guaranteed to be true.
      */
@@ -133,6 +166,29 @@ trait Symbols { self: Universe =>
      *  If yes, `isType` is also guaranteed to be true.
      */
     def isAbstractType : Boolean
+
+    /** Does this symbol represent the definition of a skolem?
+     *  Skolems are used during typechecking to represent type parameters viewed from inside their scopes.
+     *  If yes, `isType` is also guaranteed to be true.
+     */
+    def isSkolem       : Boolean
+
+    /** Does this symbol represent a free type captured by reification?
+     */
+    // needed for ones who wish to inspect reified trees
+    def isFreeType     : Boolean
+
+    /** Is the type parameter represented by this symbol contravariant?
+     */
+    def isContravariant : Boolean
+
+    /** Is the type parameter represented by this symbol contravariant?
+     */
+    def isCovariant     : Boolean
+
+    /** Does this symbol or its underlying type represent a typechecking error?
+     */
+    def isErroneous : Boolean
 
     /** The type signature of this symbol.
      *  Note if the symbol is a member of a class, one almost always is interested
@@ -170,7 +226,7 @@ trait Symbols { self: Universe =>
      *  `C`. Then `C.asType` is the type `C[T]`, but `C.asTypeConstructor` is `C`.
      */
     def asTypeConstructor: Type  // needed by LiftCode
-    
+
     /** If this symbol is a class, the type `C.this`, otherwise `NoPrefix`.
      */
     def thisPrefix: Type
@@ -180,11 +236,16 @@ trait Symbols { self: Universe =>
      */
     def selfType: Type
 
+    /** The overloaded alternatives of this symbol */
+    def alternatives: List[Symbol]
+
+    def resolveOverloaded(pre: Type = NoPrefix, targs: Seq[Type] = List(), actuals: Seq[Type]): Symbol
+
     /** A fresh symbol with given name `name`, position `pos` and flags `flags` that has
-     *  the current symbol as its owner. 
+     *  the current symbol as its owner.
      */
-    def newNestedSymbol(name: Name, pos: Position, flags: Long): Symbol // needed by LiftCode
-    
+    def newNestedSymbol(name: Name, pos: Position, flags: Long, isClass: Boolean): Symbol // needed by LiftCode   !!! not enough reason to have in the api
+
     /** Low-level operation to set the symbol's flags
      *  @return the symbol itself
      */
@@ -198,6 +259,9 @@ trait Symbols { self: Universe =>
     /** Set symbol's annotations to given annotations `annots`.
      */
     def setAnnotations(annots: AnnotationInfo*): this.type // needed by LiftCode       !!! not enough reason to have in the api
+
+    /** The kind of this symbol; used for debugging */
+    def kind: String
   }
 
   val NoSymbol: Symbol

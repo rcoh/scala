@@ -23,6 +23,7 @@ trait TreePrinters extends api.TreePrinters { self: SymbolTable =>
     else s
   }
   def quotedName(name: Name): String = quotedName(name, false)
+  def quotedName(name: String): String = quotedName(newTermName(name), false)
 
   private def symNameInternal(tree: Tree, name: Name, decoded: Boolean): String = {
     val sym = tree.symbol
@@ -31,7 +32,7 @@ trait TreePrinters extends api.TreePrinters { self: SymbolTable =>
       var suffix = ""
       if (settings.uniqid.value) suffix += ("#" + sym.id)
       if (settings.Yshowsymkinds.value) suffix += ("#" + sym.abbreviatedKindString)
-      prefix + tree.symbol.decodedName + suffix
+      prefix + quotedName(tree.symbol.decodedName) + suffix
     } else {
       quotedName(name, decoded)
     }
@@ -64,7 +65,7 @@ trait TreePrinters extends api.TreePrinters { self: SymbolTable =>
     def indent() = indentMargin += indentStep
     def undent() = indentMargin -= indentStep
 
-    def printPosition(tree: Tree) = if (doPrintPositions) print(showPos(tree.pos))
+    def printPosition(tree: Tree) = if (doPrintPositions) print(tree.pos.show)
 
     def println() {
       out.println()
@@ -175,7 +176,7 @@ trait TreePrinters extends api.TreePrinters { self: SymbolTable =>
           printAnnotations(tree)
           printModifiers(tree, mods)
           val word =
-            if (mods.hasTraitFlag) "trait"
+            if (mods.isTrait) "trait"
             else if (ifSym(tree, _.isModuleClass)) "object"
             else "class"
 
@@ -242,6 +243,10 @@ trait TreePrinters extends api.TreePrinters { self: SymbolTable =>
        case Template(parents, self, body) =>
           val currentOwner1 = currentOwner
           if (tree.symbol != NoSymbol) currentOwner = tree.symbol.owner
+//          if (parents exists isReferenceToAnyVal) {
+//            print("AnyVal")
+//          }
+//          else {
           printRow(parents, " with ")
           if (!body.isEmpty) {
             if (self.name != nme.WILDCARD) {
@@ -253,6 +258,7 @@ trait TreePrinters extends api.TreePrinters { self: SymbolTable =>
             }
             printColumn(body, "", ";", "}")
           }
+//          }
           currentOwner = currentOwner1
 
         case Block(stats, expr) =>
@@ -428,7 +434,7 @@ trait TreePrinters extends api.TreePrinters { self: SymbolTable =>
 
   /** Hook for extensions */
   def xprintTree(treePrinter: TreePrinter, tree: Tree) =
-    treePrinter.print(tree.productPrefix+tree.productIterator.mkString("(", ", ", ")"))
+    treePrinter.print(tree.printingPrefix+tree.productIterator.mkString("(", ", ", ")"))
 
   def newTreePrinter(writer: PrintWriter): TreePrinter = new TreePrinter(writer)
   def newTreePrinter(stream: OutputStream): TreePrinter = newTreePrinter(new PrintWriter(stream))

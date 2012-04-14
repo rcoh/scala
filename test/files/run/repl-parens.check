@@ -34,7 +34,7 @@ res7: (Int, Int) = (4,4)
 scala> (((2 + 2)), ((2 + 2)), 2)
 res8: (Int, Int, Int) = (4,4,2)
 
-scala> ((((2 + 2)), ((2 + 2)), 2).productIterator ++ Iterator(3) mkString)
+scala> (((((2 + 2)), ((2 + 2)), 2).productIterator ++ Iterator(3)).mkString)
 res9: String = 4423
 
 scala> 
@@ -64,7 +64,7 @@ scala> 55 ; () => 5
 res13: () => Int = <function0>
 
 scala> () => { class X ; new X }
-res14: () => Object with ScalaObject = <function0>
+res14: () => Object = <function0>
 
 scala> 
 scala> def foo(x: Int)(y: Int)(z: Int) = x+y+z

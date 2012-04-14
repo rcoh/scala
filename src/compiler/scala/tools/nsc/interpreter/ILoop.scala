@@ -23,6 +23,7 @@ import scala.reflect.NameTransformer._
 import util.ScalaClassLoader
 import ScalaClassLoader._
 import scala.tools.util._
+import language.{implicitConversions, existentials}
 
 /** The Scala interactive shell.  It provides a read-eval-print loop
  *  around the Interpreter class.
@@ -808,7 +809,10 @@ class ILoop(in0: Option[BufferedReader], protected val out: JPrintWriter)
       interpretStartingWith(intp.mostRecentVar + code)
     }
     else {
-      def runCompletion = in.completion execute code map (intp bindValue _)
+      def runCompletion =
+        try in.completion execute code map (intp bindValue _)
+        catch { case ex: Exception => None }
+
       /** Due to my accidentally letting file completion execution sneak ahead
        *  of actual parsing this now operates in such a way that the scala
        *  interpretation always wins.  However to avoid losing useful file
@@ -874,6 +878,9 @@ class ILoop(in0: Option[BufferedReader], protected val out: JPrintWriter)
           case x              => x
         }
     }
+    // Bind intp somewhere out of the regular namespace where
+    // we can get at it in generated code.
+    addThunk(intp.quietBind("$intp" -> intp))
 
     loadFiles(settings)
     // it is broken on startup; go ahead and exit
