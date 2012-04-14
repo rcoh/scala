@@ -9,6 +9,7 @@ package ast
 import scala.collection.mutable.ListBuffer
 import symtab.Flags._
 import symtab.SymbolTable
+import language.postfixOps
 
 /** XXX to resolve: TreeGen only assumes global is a SymbolTable, but
  *  TreeDSL at the moment expects a Global.  Can we get by with SymbolTable?
@@ -206,22 +207,6 @@ abstract class TreeGen extends reflect.internal.TreeGen with TreeDSL {
 
   def mkSysErrorCall(message: String): Tree =
     mkMethodCall(Sys_error, List(Literal(Constant(message))))
-
-  /** A creator for a call to a scala.reflect.Manifest or ClassManifest factory method.
-   *
-   *  @param    full          full or partial manifest (target will be Manifest or ClassManifest)
-   *  @param    constructor   name of the factory method (e.g. "classType")
-   *  @param    tparg         the type argument
-   *  @param    args          value arguments
-   *  @return   the tree
-   */
-  def mkManifestFactoryCall(full: Boolean, constructor: String, tparg: Type, args: List[Tree]): Tree =
-    mkMethodCall(
-      if (full) FullManifestModule else PartialManifestModule,
-      newTermName(constructor),
-      List(tparg),
-      args
-    )
 
   /** Make a synchronized block on 'monitor'. */
   def mkSynchronized(monitor: Tree, body: Tree): Tree =
