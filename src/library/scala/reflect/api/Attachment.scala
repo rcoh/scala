@@ -12,5 +12,18 @@ trait Attachment {
   def pos: Position
 
   /** Creates a copy of this attachment with its position updated */
-  def withPos(pos: Position): Attachment
+  def withPos(newPos: Position): Attachment
+
+  /** Gets the underlying payload */
+  def payload: Any
+
+  /** Creates a copy of this attachment with its payload updated */
+  def withPayload(newPayload: Any): Attachment
+}
+
+// [Eugene] with the introduction of `attach` and `attachment[T]` users don't need to create custom attachments anymore
+// however, we cannot move attachments to scala.reflect.internal, because they are used in Trees, which are implemented completely in scala.reflect.api
+private[scala] case class NontrivialAttachment(pos: api.Position, payload: collection.mutable.ListBuffer[Any]) extends Attachment {
+  def withPos(newPos: api.Position) = copy(pos = newPos, payload = payload)
+  def withPayload(newPayload: Any) = copy(pos = pos, payload = newPayload.asInstanceOf[collection.mutable.ListBuffer[Any]])
 }
