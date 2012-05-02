@@ -13,6 +13,7 @@ import generic._
 import mutable.{Builder, StringBuilder, LazyBuilder, ListBuffer}
 import scala.annotation.tailrec
 import Stream.cons
+import language.implicitConversions
 
 /** The class `Stream` implements lazy lists where elements
  *  are only evaluated when they are needed. Here is an example:
@@ -176,7 +177,7 @@ import Stream.cons
  *  section on `Streams` for more information.
 
  *  @define naturalsEx def naturalsFrom(i: Int): Stream[Int] = i #:: naturalsFrom(i + 1)
- *  @define Coll Stream
+ *  @define Coll `Stream`
  *  @define coll stream
  *  @define orderDependent
  *  @define orderDependentFold
@@ -804,9 +805,9 @@ self =>
     these
   }
 
-  /** Builds a new stream from this stream in which any duplicates (wrt to ==)
-   * have been removed.  Among duplicate elements, only the first one is
-   * retained in the resulting `Stream`.
+  /** Builds a new stream from this stream in which any duplicates (as
+   * determined by `==`) have been removed. Among duplicate elements, only the
+   * first one is retained in the resulting `Stream`.
    *
    * @return A new `Stream` representing the result of applying distinctness to
    * the original `Stream`.
@@ -821,7 +822,7 @@ self =>
    */
   override def distinct: Stream[A] =
     if (isEmpty) this
-    else cons(head, tail.filter(head !=).distinct)
+    else cons(head, tail.filter(head != _).distinct)
 
   /** Returns a new sequence of given length containing the elements of this
    * sequence followed by zero or more occurrences of given elements.

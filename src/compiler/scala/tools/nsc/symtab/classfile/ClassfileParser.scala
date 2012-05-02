@@ -433,10 +433,7 @@ abstract class ClassfileParser {
           sym.info.decl(part.encode)
         }//.suchThat(module == _.isModule)
 
-        sym = (
-          if (sym1 ne NoSymbol) sym1
-          else sym.info.decl(part.encode.toTypeName)
-        )
+        sym = sym1 orElse sym.info.decl(part.encode.toTypeName)
       }
     }
     sym
@@ -446,7 +443,11 @@ abstract class ClassfileParser {
   def classNameToSymbol(name: Name): Symbol = {
     def loadClassSymbol(name: Name): Symbol = {
       val file = global.classPath findSourceFile ("" +name) getOrElse {
-        warning("Class " + name + " not found - continuing with a stub.")
+        // SI-5593 Scaladoc's current strategy is to visit all packages in search of user code that can be documented
+        // therefore, it will rummage through the classpath triggering errors whenever it encounters package objects
+        // that are not in their correct place (see bug for details)
+        if (!settings.isScaladoc)
+          warning("Class " + name + " not found - continuing with a stub.")
         return NoSymbol.newClass(name.toTypeName)
       }
       val completer     = new global.loaders.ClassfileLoader(file)
@@ -731,7 +732,7 @@ abstract class ClassfileParser {
                       }
                       val newtparam = sym.newExistential(newTypeName("?"+i), sym.pos) setInfo bounds
                       existentials += newtparam
-                      xs += newtparam.tpe //@M should probably be .tpeHK
+                      xs += newtparam.tpeHK
                       i += 1
                     case _ =>
                       xs += sig2type(tparams, skiptvs)
@@ -745,7 +746,7 @@ abstract class ClassfileParser {
               } else {
                 // raw type - existentially quantify all type parameters
                 val eparams = typeParamsToExistentials(classSym, classSym.unsafeTypeParams)
-                val t = typeRef(pre, classSym, eparams.map(_.tpe))
+                val t = typeRef(pre, classSym, eparams.map(_.tpeHK))
                 val res = newExistentialType(eparams, t)
                 if (settings.debug.value && settings.verbose.value)
                   println("raw type " + classSym + " -> " + res)
@@ -775,7 +776,8 @@ abstract class ClassfileParser {
           // with arrays of primitive types.
           if (elemtp.typeSymbol.isAbstractType && !(elemtp <:< definitions.ObjectClass.tpe))
             elemtp = intersectionType(List(elemtp, definitions.ObjectClass.tpe))
-          appliedType(definitions.ArrayClass.tpe, List(elemtp))
+
+          definitions.arrayType(elemtp)
         case '(' =>
           // we need a method symbol. given in line 486 by calling getType(methodSym, ..)
           assert(sym ne null, sig)

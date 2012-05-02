@@ -44,7 +44,7 @@ object ScalaBuild extends Build with Layers {
           </license>
         </licenses>
         <scm>
-          <connection>scm:svn:http://lampsvn.epfl.ch/svn-repos/scala/scala/trunk</connection>
+          <connection>scm:git:git://github.com/scala/scala.git</connection>
         </scm>
         <issueManagement>
           <system>jira</system>
@@ -93,7 +93,7 @@ object ScalaBuild extends Build with Layers {
         </license>
       </licenses>
       <scm>
-        <connection>scm:svn:http://lampsvn.epfl.ch/svn-repos/scala/scala/trunk</connection>
+        <connection>scm:git:git://github.com/scala/scala.git</connection>
       </scm>
       <issueManagement>
         <system>jira</system>
@@ -251,7 +251,6 @@ object ScalaBuild extends Build with Layers {
   // TODO - Actors + swing separate jars...
   lazy val dependentProjectSettings = settingOverrides ++ Seq(quickScalaInstance, quickScalaLibraryDependency, addCheaterDependency("scala-library"))
   lazy val actors = Project("actors", file(".")) settings(dependentProjectSettings:_*) dependsOn(forkjoin % "provided")
-  lazy val dbc = Project("dbc", file(".")) settings(dependentProjectSettings:_*)
   // TODO - Remove actors dependency from pom...
   lazy val swing = Project("swing", file(".")) settings(dependentProjectSettings:_*) dependsOn(actors % "provided")
   // This project will generate man pages (in man1 and html) for scala.    
@@ -492,8 +491,8 @@ object ScalaBuild extends Build with Layers {
     genBin <<= genBinTask(genBinRunner, binDir, fullClasspath in Runtime, false),
     binDir in genBinQuick <<= baseDirectory apply (_ / "target" / "bin"),
     // Configure the classpath this way to avoid having .jar files and previous layers on the classpath.
-    fullClasspath in Runtime in genBinQuick <<= Seq(quickComp,quickLib,scalap,actors,swing,dbc,fjbg,forkjoin).map(classDirectory in Compile in _).join.map(Attributed.blankSeq),
-    // fullClasspath in Runtime in genBinQuick <++= (fullClasspath in Compile in jline),
+    fullClasspath in Runtime in genBinQuick <<= Seq(quickComp,quickLib,scalap,actors,swing,fjbg,jline,forkjoin).map(classDirectory in Compile in _).join.map(Attributed.blankSeq),
+    fullClasspath in Runtime in genBinQuick <++= (fullClasspath in Compile in jline),
     genBinQuick <<= genBinTask(genBinRunner, binDir in genBinQuick, fullClasspath in Runtime in genBinQuick, true),
     runManmakerMan <<= runManmakerTask(fullClasspath in Runtime in manmaker, runner in manmaker, "scala.tools.docutil.EmitManPage", "man1", ".1"),
     runManmakerHtml <<= runManmakerTask(fullClasspath in Runtime in manmaker, runner in manmaker, "scala.tools.docutil.EmitHtml", "doc", ".html"),
@@ -521,10 +520,9 @@ object ScalaBuild extends Build with Layers {
     },
     // Add in some more dependencies
     makeDistMappings <<= (makeDistMappings, 
-                          packageBin in swing in Compile,
-                          packageBin in dbc in Compile) map {
+                          packageBin in swing in Compile) map {
       (dist, s, d) =>
-        dist ++ Seq(s -> "lib/scala-swing.jar", d -> "lib/scala-dbc.jar")
+        dist ++ Seq(s -> "lib/scala-swing.jar")
     },
     makeDist <<= (makeDistMappings, baseDirectory, streams) map { (maps, dir, s) => 
       s.log.debug("Map = " + maps.mkString("\n")) 
