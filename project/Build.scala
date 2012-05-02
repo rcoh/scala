@@ -521,8 +521,7 @@ object ScalaBuild extends Build with Layers {
     // Add in some more dependencies
     makeDistMappings <<= (makeDistMappings, 
                           packageBin in swing in Compile) map {
-      (dist, s, d) =>
-        dist ++ Seq(s -> "lib/scala-swing.jar")
+      (dist, s) => dist ++ Seq(s -> "lib/scala-swing.jar")
     },
     makeDist <<= (makeDistMappings, baseDirectory, streams) map { (maps, dir, s) => 
       s.log.debug("Map = " + maps.mkString("\n")) 
